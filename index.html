@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,500;0,700;0,800;1,500&family=Alegreya+Sans:wght@400;500;700&display=swap" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/@n8n/chat/dist/style.css" rel="stylesheet">
 <style>
 :root{
   --indigo:#1F2A5C;
@@ -146,41 +145,13 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:1rem}
 .chat.open{display:flex;animation:pop .22s ease-out}
 @keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.chat.open,.chat-launch .ico{animation:none}.spine{transition:none}html{scroll-behavior:auto}}
-#n8n-chat{flex:1;min-height:0;position:relative;
-  --chat--color-primary:var(--grana);
-  --chat--color-primary-shade-50:#9A1F33;
-  --chat--color-primary-shade-100:#821A2B;
-  --chat--color-secondary:var(--indigo);
-  --chat--color-secondary-shade-50:#18214A;
-  --chat--color-white:var(--surface);
-  --chat--color-light:var(--bg);
-  --chat--color-light-shade-50:var(--piedra);
-  --chat--color-light-shade-100:var(--line);
-  --chat--color-medium:var(--line);
-  --chat--color-dark:var(--text);
-  --chat--color-disabled:var(--muted);
-  --chat--color-typing:var(--muted);
-  --chat--font-family:var(--sans);
-  --chat--border-radius:14px;
-  --chat--body--background:var(--bg);
-  --chat--footer--background:var(--surface);
-  --chat--footer--color:var(--text);
-  --chat--message--font-size:1rem;
-  --chat--message--bot--background:var(--bubble-bot);
-  --chat--message--bot--color:var(--text);
-  --chat--message--bot--border:none;
-  --chat--message--user--background:var(--bubble-user);
-  --chat--message--user--color:var(--bubble-user-text);
-  --chat--message--user--border:none;
-  --chat--input--background:var(--bg);
-  --chat--input--text-color:var(--text);
-  --chat--input--send--button--color:var(--grana);
-}
-#n8n-chat > *{height:100%}
-#n8n-chat .chat-header{display:none}
-.chat-fallback{padding:1.2rem;display:grid;gap:.8rem;align-content:start;height:100%;background:var(--bg)}
-.chat-fallback p{margin:0}
-.chat-loading{display:grid;place-items:center;height:100%;color:var(--muted);background:var(--bg)}
+.typing{display:inline-flex;gap:5px;align-items:center}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.chat-foot input:disabled,.chat-foot button:disabled{opacity:.6;cursor:wait}
+.msg.error{background:transparent;border:1.5px solid var(--grana)}
+.msg a{color:inherit;font-weight:700}
 .chat-head{background:var(--indigo);color:#fff;padding:.9rem 1rem;display:flex;align-items:center;gap:.7rem}
 .chat-head b{font-family:var(--serif);font-size:1.15rem;display:block;line-height:1.1}
 .chat-head small{color:#C9CDE3;font-size:.88rem}
@@ -327,7 +298,12 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:1rem}
     <button type="button" id="chatClose" aria-label="Cerrar chat">×</button>
   </div>
   <div class="awayu" aria-hidden="true"></div>
-  <div id="n8n-chat"><div class="chat-loading">Conectando con el asistente…</div></div>
+  <div class="chat-body" id="chatBody" aria-live="polite"></div>
+  <form class="chat-foot" id="chatForm">
+    <label class="sr" for="chatInput">Escribe tu consulta</label>
+    <input id="chatInput" placeholder="Escribe tu consulta…" autocomplete="off" maxlength="1000">
+    <button class="btn" type="submit" id="chatSend">Enviar</button>
+  </form>
 </div>
 
 <script>
@@ -336,12 +312,20 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:1rem}
   var MAIL = "amador.riverah@gmail.com";
 
   var N8N_WEBHOOK = "https://amadorperu.app.n8n.cloud/webhook/b1f0c001-aaaa-4bbb-8ccc-libreria00001/chat";
-  var N8N_JS = "https://cdn.jsdelivr.net/npm/@n8n/chat/dist/chat.bundle.es.js";
-
+  var body = document.getElementById("chatBody");
   var chat = document.getElementById("chat");
   var launch = document.getElementById("chatLaunch");
-  var mount = document.getElementById("n8n-chat");
-  var started = false;
+  var input = document.getElementById("chatInput");
+  var sendBtn = document.getElementById("chatSend");
+  var greeted = false;
+
+  function newId(){
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "s-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+  var sessionId;
+  try { sessionId = sessionStorage.getItem("la_chat_session"); } catch(e) {}
+  if (!sessionId){ sessionId = newId(); try { sessionStorage.setItem("la_chat_session", sessionId); } catch(e) {} }
 
   function openLink(url){
     var a = document.createElement("a");
@@ -349,51 +333,97 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:1rem}
     document.body.appendChild(a); a.click(); a.remove();
   }
 
-  function fallback(){
-    mount.innerHTML =
-      '<div class="chat-fallback">' +
-      '<p class="msg bot">El asistente no está disponible en este momento. Escríbenos directamente y te respondemos hoy.</p>' +
-      '<a class="btn wa" href="https://wa.me/' + WA + '" target="_blank" rel="noopener">Escribir por WhatsApp</a>' +
-      '<a class="btn alt" href="mailto:' + MAIL + '">Escribir por correo</a></div>';
+  function add(text, who, extra){
+    var d = document.createElement("div");
+    d.className = "msg " + who + (extra ? " " + extra : "");
+    d.textContent = text;
+    body.appendChild(d);
+    body.scrollTop = body.scrollHeight;
+    return d;
   }
 
-  function startN8n(){
-    if (started) return;
-    started = true;
-    import(N8N_JS).then(function(mod){
-      mount.innerHTML = "";
-      mod.createChat({
-        webhookUrl: N8N_WEBHOOK,
-        target: "#n8n-chat",
-        mode: "fullscreen",
-        showWelcomeScreen: false,
-        loadPreviousSession: true,
-        chatInputKey: "chatInput",
-        chatSessionKey: "sessionId",
-        metadata: { origen: "web-librerias-andinas" },
-        defaultLanguage: "en",
-        initialMessages: [
-          "¡Hola! 🤖 Soy el asistente de Librerías Andinas.",
-          "Pregúntame por horarios, sedes, envíos, pagos, textos escolares o pedidos especiales."
-        ],
-        i18n: { en: {
-          title: "Asistente Andino",
-          subtitle: "Respuestas al instante",
-          footer: "",
-          getStarted: "Nueva conversación",
-          inputPlaceholder: "Escribe tu pregunta…",
-          closeButtonTooltip: "Cerrar"
-        } }
-      });
-    }).catch(function(){ fallback(); });
+  function typing(){
+    var d = document.createElement("div");
+    d.className = "msg bot";
+    d.setAttribute("aria-label", "El asistente está escribiendo");
+    d.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    body.appendChild(d);
+    body.scrollTop = body.scrollHeight;
+    return d;
   }
+
+  // Lee la respuesta de n8n: JSON normal o streaming por líneas
+  function readReply(raw){
+    raw = (raw || "").trim();
+    if (!raw) return "";
+    try {
+      var j = JSON.parse(raw);
+      if (Array.isArray(j)) j = j[0] || {};
+      return j.output || j.text || j.message || j.response || (typeof j === "string" ? j : "");
+    } catch(e) {
+      var out = "";
+      raw.split("\n").forEach(function(line){
+        try {
+          var o = JSON.parse(line);
+          if (o.type === "item" && o.content) out += o.content;
+          else if (o.output) out += o.output;
+        } catch(_) {}
+      });
+      return out || raw;
+    }
+  }
+
+  function send(text){
+    add(text, "user");
+    input.value = "";
+    input.disabled = true; sendBtn.disabled = true;
+    var t = typing();
+    fetch(N8N_WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "sendMessage",
+        sessionId: sessionId,
+        chatInput: text,
+        metadata: { origen: "web-librerias-andinas" }
+      })
+    })
+    .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+    .then(function(raw){
+      t.remove();
+      var reply = readReply(raw);
+      add(reply || "Recibí tu consulta. Un asesor te responderá pronto.", "bot");
+    })
+    .catch(function(){
+      t.remove();
+      var d = add("No logré conectar con el asistente. Escríbenos por WhatsApp y te respondemos hoy.", "bot", "error");
+      var a = document.createElement("a");
+      a.href = "https://wa.me/" + WA + "?text=" + encodeURIComponent("Hola, tengo esta consulta: " + text);
+      a.target = "_blank"; a.rel = "noopener"; a.textContent = "\nAbrir WhatsApp";
+      d.appendChild(a);
+    })
+    .finally(function(){
+      input.disabled = false; sendBtn.disabled = false;
+      input.focus();
+    });
+  }
+
+  document.getElementById("chatForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    var v = input.value.trim();
+    if (v) send(v);
+  });
 
   function openChat(){
     chat.classList.add("open");
     launch.style.display = "none";
     launch.setAttribute("aria-expanded","true");
-    startN8n();
-    setTimeout(function(){ var t = mount.querySelector("textarea,input"); if (t) t.focus(); }, 300);
+    if (!greeted){
+      greeted = true;
+      add("¡Hola! 🤖 Soy el asistente de Librerías Andinas.", "bot");
+      add("Pregúntame por horarios, sedes, envíos, pagos, textos escolares o pedidos especiales.", "bot");
+    }
+    setTimeout(function(){ input.focus(); }, 60);
   }
   function closeChat(){
     chat.classList.remove("open");
